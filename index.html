@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>WLD Balance Checker - API Ready</title>
+<title>WLD Balance Checker</title>
 
 <!-- Tailwind CSS from CDN -->
 <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
@@ -72,28 +72,16 @@
                 <div id="results" class="bg-gray-50 p-4 rounded-md min-h-20">
                     <p class="text-gray-500 text-center">Click "Check All Balances" to see results</p>
                 </div>
-                <div class="mt-4">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">API Endpoint URL:</label>
-                    <div class="flex">
-                        <input type="text" id="apiUrl" readonly class="flex-1 px-3 py-2 bg-gray-50 border border-gray-300 rounded-l-md text-sm">
-                        <button onclick="copyUrl()" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-r-md transition">
-                            <i class="fas fa-copy"></i>
-                        </button>
-                    </div>
-                    <p class="text-xs text-gray-500 mt-1">Use this URL for HTTP requests from automation apps</p>
-                </div>
             </div>
         </div>
     </div>
 
 <script>
-const WORLD_CHAIN_ID = 480;
 const WLD_TOKEN_CONTRACT = "0x2cfc85d8e48f8eab294be644d9e25c3030863003";
 const RPC_ENDPOINTS = [
     "https://worldchain-mainnet.g.alchemy.com/public",
     "https://480.rpc.thirdweb.com"
 ];
-
 let wallets = [];
 
 function isApiRequest() {
@@ -106,7 +94,6 @@ function isApiRequest() {
 }
 
 window.onload = function() {
-    updateApiUrl();
     loadWallets();
     if (isApiRequest()) {
         document.body.style.display = 'none';
@@ -118,12 +105,7 @@ window.onload = function() {
 
 function loadWallets() {
     const saved = localStorage.getItem('wldWallets');
-    if (saved) {
-        wallets = JSON.parse(saved);
-    } else {
-        wallets = [];
-        saveWallets();
-    }
+    wallets = saved ? JSON.parse(saved) : [];
 }
 
 function saveWallets() {
@@ -133,18 +115,9 @@ function saveWallets() {
 function addWallet() {
     const nickname = document.getElementById('nickname').value.trim();
     const address = document.getElementById('address').value.trim();
-    if (!nickname || !address) {
-        alert('Please enter both nickname and address');
-        return;
-    }
-    if (!address.match(/^0x[a-fA-F0-9]{40}$/)) {
-        alert('Please enter a valid Ethereum address');
-        return;
-    }
-    if (wallets.some(w => w.address.toLowerCase() === address.toLowerCase())) {
-        alert('This address is already being monitored');
-        return;
-    }
+    if (!nickname || !address) return alert('Please enter both nickname and address');
+    if (!address.match(/^0x[a-fA-F0-9]{40}$/)) return alert('Please enter a valid Ethereum address');
+    if (wallets.some(w => w.address.toLowerCase() === address.toLowerCase())) return alert('This address is already being monitored');
     wallets.push({nickname, address});
     saveWallets();
     renderWallets();
@@ -169,8 +142,13 @@ function renderWallets() {
     container.innerHTML = wallets.map((wallet, index) => `
         <div class="flex justify-between items-center p-3 bg-gray-50 rounded-md">
             <div>
-                <span class="font-semibold text-gray-800">${wallet.nickname}</span>
+                <a href="https://worldscan.org/token/${WLD_TOKEN_CONTRACT}?a=${wallet.address}" 
+                   target="_blank" 
+                   class="font-semibold text-blue-600 hover:underline">${wallet.nickname}</a>
                 <span class="text-sm text-gray-600 ml-2">${wallet.address.slice(0, 8)}...${wallet.address.slice(-6)}</span>
+                <button onclick="copyToClipboard('${wallet.address}')" class="ml-2 text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-copy"></i>
+                </button>
             </div>
             <button onclick="removeWallet(${index})" class="text-red-500 hover:text-red-700 p-2">
                 <i class="fas fa-trash"></i>
@@ -179,26 +157,17 @@ function renderWallets() {
     `).join('');
 }
 
-function updateApiUrl() {
-    document.getElementById('apiUrl').value = window.location.href + '?api=true';
-}
-
-function copyUrl() {
-    const urlInput = document.getElementById('apiUrl');
-    urlInput.select();
-    document.execCommand('copy');
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        alert("Copied: " + text);
+    });
 }
 
 async function makeRpcCall(endpoint, method, params) {
     const response = await fetch(endpoint, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-            jsonrpc: '2.0',
-            id: 1,
-            method: method,
-            params: params
-        })
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params })
     });
     const data = await response.json();
     if (data.error) throw new Error(data.error.message);
@@ -215,12 +184,16 @@ async function getTokenBalance(address) {
                 { to: WLD_TOKEN_CONTRACT, data: callData },
                 'latest'
             ]);
-            const balanceWei = BigInt(result);
-            const balance = Number(balanceWei) / Math.pow(10, 18);
-            return balance;
+            return Number(BigInt(result)) / Math.pow(10, 18);
         } catch {}
     }
     throw new Error('All RPC endpoints failed');
+}
+
+async function fetchWLDPricePHP() {
+    const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=worldcoin-wld&vs_currencies=php');
+    const data = await res.json();
+    return data['worldcoin-wld'].php;
 }
 
 async function checkAllBalances() {
@@ -231,11 +204,13 @@ async function checkAllBalances() {
     document.getElementById('loading').classList.remove('hidden');
     const results = [];
     try {
+        const wldPricePHP = await fetchWLDPricePHP();
         for (const wallet of wallets) {
             try {
                 const balance = await getTokenBalance(wallet.address);
                 const formattedBalance = balance % 1 === 0 ? Math.floor(balance) : balance.toFixed(2);
-                results.push(`${wallet.nickname} ${formattedBalance} WLD token`);
+                const pesoValue = (balance * wldPricePHP).toFixed(2);
+                results.push(`${wallet.nickname} ${formattedBalance} WLD (₱${pesoValue})`);
             } catch {
                 results.push(`${wallet.nickname} Error checking balance`);
             }
@@ -251,12 +226,13 @@ async function checkAllBalancesApi() {
         document.write('No wallets configured');
         return;
     }
+    const wldPricePHP = await fetchWLDPricePHP();
     const results = [];
     for (const wallet of wallets) {
         try {
             const balance = await getTokenBalance(wallet.address);
-            const formattedBalance = balance % 1 === 0 ? Math.floor(balance) : balance.toFixed(2);
-            results.push(`${wallet.nickname} ${formattedBalance} WLD token`);
+            const pesoValue = (balance * wldPricePHP).toFixed(2);
+            results.push(`${wallet.nickname} ${balance.toFixed(2)} WLD (₱${pesoValue})`);
         } catch {
             results.push(`${wallet.nickname} Error`);
         }
