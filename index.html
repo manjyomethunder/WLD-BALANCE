@@ -10,8 +10,12 @@
 <!-- Font Awesome -->
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" rel="stylesheet">
 
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyBmaWxsPSJibGFjayIgdmlld0JveD0iMCAwIDI0IDI0IiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxjaXJjbGUgY3g9IjEyIiBjeT0iMTIiIHI9IjkiIHN0cm9rZT0iYmxhY2siIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0id2hpdGUiLz48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSIzIiBmaWxsPSJibGFjayIvPjwvc3ZnPg==">
+
 </head>
 <body class="bg-gray-100 min-h-screen">
+
+    <!-- Loading -->
     <div id="loading" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
         <div class="bg-white p-6 rounded-lg">
             <i class="fas fa-spinner fa-spin text-2xl text-blue-500"></i>
@@ -23,7 +27,19 @@
         <h1 class="text-3xl font-bold text-center mb-2 text-gray-800">
             <i class="fas fa-coins text-yellow-500"></i> WLD Balance Checker
         </h1>
-        <p class="text-center text-gray-600 mb-8">Real-time World Chain token balance monitoring</p>
+        <p class="text-center text-gray-600 mb-6">Real-time World Chain token balance monitoring</p>
+
+        <!-- Price Card -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6 flex justify-between items-center">
+            <div>
+                <h2 class="text-lg font-semibold text-gray-800">WLD Price</h2>
+                <p id="wldPrice" class="text-2xl font-bold text-green-600">₱0.00</p>
+            </div>
+            <div>
+                <h2 class="text-lg font-semibold text-gray-800">First Claim Value (25 WLD)</h2>
+                <p id="firstClaimValue" class="text-2xl font-bold text-blue-600">₱0.00</p>
+            </div>
+        </div>
 
         <!-- Add Wallet Section -->
         <div class="bg-white rounded-lg shadow-md p-6 mb-6">
@@ -70,11 +86,19 @@ const RPC_ENDPOINTS = [
     "https://480.rpc.thirdweb.com"
 ];
 let wallets = [];
+let lastBalances = {};
+let wldPricePHP = 0;
 
 window.onload = function() {
     loadWallets();
     renderWallets();
+    checkAllBalances();
+    setInterval(checkAllBalances, 60000); // auto-refresh every 60s
 };
+
+function formatPHP(value) {
+    return "₱" + Number(value).toLocaleString("en-PH", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
 
 function loadWallets() {
     const saved = localStorage.getItem('wldWallets');
@@ -165,26 +189,44 @@ async function getTokenBalance(address) {
 }
 
 async function fetchWLDPricePHP() {
-    const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=worldcoin-wld&vs_currencies=php');
-    const data = await res.json();
-    return data['worldcoin-wld'].php;
+    try {
+        const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=worldcoin-wld&vs_currencies=php');
+        const data = await res.json();
+        return data['worldcoin-wld'].php;
+    } catch {
+        return wldPricePHP; // fallback to last known
+    }
 }
 
 async function checkAllBalances() {
     if (wallets.length === 0) return;
     document.getElementById('loading').classList.remove('hidden');
     try {
-        const wldPricePHP = await fetchWLDPricePHP();
+        wldPricePHP = await fetchWLDPricePHP();
+        document.getElementById("wldPrice").innerText = formatPHP(wldPricePHP);
+        document.getElementById("firstClaimValue").innerText = formatPHP(wldPricePHP * 25);
+
         for (let i = 0; i < wallets.length; i++) {
             const balDiv = document.getElementById(`balance-${i}`);
             balDiv.classList.remove("text-green-600", "text-red-500");
             balDiv.textContent = "...";
             try {
                 const balance = await getTokenBalance(wallets[i].address);
-                const formattedBalance = balance % 1 === 0 ? Math.floor(balance) : balance.toFixed(2);
+                const formattedBalance = balance.toFixed(2);
                 const pesoValue = (balance * wldPricePHP).toFixed(2);
-                balDiv.textContent = `${formattedBalance} WLD (₱${pesoValue})`;
+                balDiv.textContent = `${formattedBalance} WLD (${formatPHP(pesoValue)})`;
                 balDiv.classList.add("text-green-600");
+
+                // Check for changes (notify)
+                if (lastBalances[wallets[i].address] !== undefined && lastBalances[wallets[i].address] !== balance) {
+                    const diff = balance - lastBalances[wallets[i].address];
+                    if (diff > 0) {
+                        notifyUser(`+${diff.toFixed(2)} WLD deposited to ${wallets[i].nickname}`);
+                    } else {
+                        notifyUser(`${diff.toFixed(2)} WLD withdrawn from ${wallets[i].nickname}`);
+                    }
+                }
+                lastBalances[wallets[i].address] = balance;
             } catch {
                 balDiv.textContent = "Error";
                 balDiv.classList.add("text-red-500");
@@ -193,6 +235,18 @@ async function checkAllBalances() {
     } finally {
         document.getElementById('loading').classList.add('hidden');
     }
+}
+
+// Notifications + Tab Alert
+function notifyUser(message) {
+    if (Notification.permission === "granted") {
+        new Notification("WLD Balance Update", { body: message });
+    } else {
+        document.title = "🔔 " + message;
+    }
+}
+if (Notification.permission !== "granted") {
+    Notification.requestPermission();
 }
 </script>
 
