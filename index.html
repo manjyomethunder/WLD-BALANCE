@@ -1,227 +1,200 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WLD Balance Checker</title>
-  <!-- Base64 Favicon -->
-  <link rel="icon" type="image/png" href="data:image/png;base64,INSERT_BASE64_LOGO_HERE"/>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      background: #f9fafb;
-      margin: 0;
-      padding: 20px;
-      color: #222;
-    }
-    .card {
-      background: #fff;
-      padding: 20px;
-      margin: 0 auto 20px auto;
-      border-radius: 12px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-      max-width: 600px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .card img {
-      height: 40px;
-      margin-right: 15px;
-    }
-    .wallets {
-      max-width: 600px;
-      margin: 0 auto;
-    }
-    .wallet {
-      background: #fff;
-      padding: 12px;
-      margin-bottom: 10px;
-      border-radius: 10px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 14px;
-    }
-    .wallet span.address {
-      font-family: monospace;
-      color: #444;
-    }
-    button {
-      background: #4CAF50;
-      border: none;
-      padding: 6px 12px;
-      border-radius: 6px;
-      color: white;
-      cursor: pointer;
-      font-size: 13px;
-    }
-    button:hover {
-      background: #43a047;
-    }
-    .actions {
-      margin-top: 20px;
-      text-align: center;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WLD Balance Checker</title>
+
+<!-- Tailwind CSS -->
+<link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+<!-- Font Awesome -->
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" rel="stylesheet">
+
 </head>
-<body>
-  <div class="card">
-    <!-- Base64 logo -->
-    <img src="data:image/png;base64,INSERT_BASE64_LOGO_HERE" alt="Logo">
-    <div>
-      <div id="price">WLD Price: ₱0.00</div>
-      <div id="claim">First Claim Value: ₱0.00</div>
+<body class="bg-gray-100 min-h-screen">
+    <div id="loading" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white p-6 rounded-lg">
+            <i class="fas fa-spinner fa-spin text-2xl text-blue-500"></i>
+            <span class="ml-3">Checking balances...</span>
+        </div>
     </div>
-  </div>
 
-  <div class="wallets" id="wallets"></div>
+    <div class="container mx-auto px-4 py-8 max-w-4xl">
+        <h1 class="text-3xl font-bold text-center mb-2 text-gray-800">
+            <i class="fas fa-coins text-yellow-500"></i> WLD Balance Checker
+        </h1>
+        <p class="text-center text-gray-600 mb-8">Real-time World Chain token balance monitoring</p>
 
-  <div class="actions">
-    <input type="text" id="nickname" placeholder="Nickname">
-    <input type="text" id="address" placeholder="Wallet Address" size="42">
-    <button onclick="addWallet()">Add Wallet</button>
-    <br><br>
-    <button onclick="checkAllBalances()">Check All Balances</button>
-  </div>
-
-  <script>
-    const WLD_TOKEN_CONTRACT = "0x2cfc85d8e48f8eab294be644d9e25c3030863003";
-    const RPC_ENDPOINTS = [
-      "https://rpc.ankr.com/eth",
-      "https://eth.llamarpc.com"
-    ];
-    const PRICE_API = "https://api.coingecko.com/api/v3/simple/price?ids=worldcoin-wld&vs_currencies=php";
-
-    let wallets = JSON.parse(localStorage.getItem("wallets") || "[]");
-    let lastBalances = {};
-    let lastPrice = localStorage.getItem("wld_price_php") || null;
-
-    // format with commas
-    function formatPHP(value) {
-      return "₱" + Number(value).toLocaleString("en-PH", {minimumFractionDigits: 2, maximumFractionDigits: 2});
-    }
-
-    // Notifications
-    function notify(title, body) {
-      if (Notification.permission === "granted") {
-        new Notification(title, {body: body});
-      } else {
-        document.title = "🔔 " + title;
-      }
-    }
-
-    // Add wallet
-    function addWallet() {
-      const nickname = document.getElementById("nickname").value.trim();
-      const address = document.getElementById("address").value.trim();
-      if (!nickname || !address) return;
-      wallets.push({nickname, address});
-      localStorage.setItem("wallets", JSON.stringify(wallets));
-      renderWallets();
-    }
-
-    // Remove wallet
-    function removeWallet(i) {
-      wallets.splice(i, 1);
-      localStorage.setItem("wallets", JSON.stringify(wallets));
-      renderWallets();
-    }
-
-    // Copy address
-    function copyAddress(addr) {
-      navigator.clipboard.writeText(addr);
-      alert("Copied: " + addr);
-    }
-
-    // RPC Call
-    async function makeRpcCall(endpoint, method, params) {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({jsonrpc:"2.0",id:1,method,params})
-      });
-      const data = await response.json();
-      return data.result;
-    }
-
-    // Get token balance
-    async function getTokenBalance(address) {
-      const balanceOfSignature = "0x70a08231";
-      const paddedAddress = address.slice(2).padStart(64, "0");
-      const callData = balanceOfSignature + paddedAddress;
-      for (const endpoint of RPC_ENDPOINTS) {
-        try {
-          const result = await makeRpcCall(endpoint, "eth_call", [{to: WLD_TOKEN_CONTRACT, data: callData}, "latest"]);
-          return Number(BigInt(result) / BigInt(1e16)) / 100; // 2 decimals
-        } catch {}
-      }
-      return 0;
-    }
-
-    async function fetchPrice() {
-      try {
-        const res = await fetch(PRICE_API);
-        const json = await res.json();
-        const price = json["worldcoin-wld"]["php"];
-        lastPrice = price;
-        localStorage.setItem("wld_price_php", price);
-        return price;
-      } catch {
-        return lastPrice || 0;
-      }
-    }
-
-    async function checkAllBalances() {
-      const price = await fetchPrice();
-      document.getElementById("price").innerText = "WLD Price: " + formatPHP(price);
-      document.getElementById("claim").innerText = "First Claim Value: " + formatPHP(price * 25);
-
-      for (let wallet of wallets) {
-        const bal = await getTokenBalance(wallet.address);
-        const old = lastBalances[wallet.address] || 0;
-        lastBalances[wallet.address] = bal;
-
-        const phpValue = bal * price;
-        document.getElementById("bal-" + wallet.address).innerText = bal.toFixed(2) + " WLD (" + formatPHP(phpValue) + ")";
-
-        if (old && bal !== old) {
-          if (bal > old) {
-            notify("+" + (bal-old).toFixed(2) + " WLD deposited to " + wallet.nickname,
-                   "New balance: " + bal.toFixed(2) + " WLD");
-          } else {
-            notify("-" + (old-bal).toFixed(2) + " WLD withdrawn from " + wallet.nickname,
-                   "New balance: " + bal.toFixed(2) + " WLD");
-          }
-        }
-      }
-    }
-
-    function renderWallets() {
-      const div = document.getElementById("wallets");
-      div.innerHTML = "";
-      wallets.forEach((w,i) => {
-        div.innerHTML += `
-          <div class="wallet">
-            <div>
-              <b>${w.nickname}</b> 
-              <span class="address">${w.address.slice(0,6)}...${w.address.slice(-6)}</span>
-              <button onclick="copyAddress('${w.address}')">📋</button>
+        <!-- Add Wallet Section -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4 text-gray-800">
+                <i class="fas fa-plus-circle text-green-500"></i> Add New Wallet
+            </h2>
+            <div class="grid md:grid-cols-3 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Nickname</label>
+                    <input type="text" id="nickname" placeholder="e.g., John" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Wallet Address</label>
+                    <input type="text" id="address" placeholder="0x..." class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div class="flex items-end">
+                    <button onclick="addWallet()" class="w-full bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded-md transition">
+                        <i class="fas fa-plus"></i> Add Wallet
+                    </button>
+                </div>
             </div>
-            <div id="bal-${w.address}">Loading...</div>
-            <button onclick="removeWallet(${i})">❌</button>
-          </div>`;
-      });
-    }
+        </div>
 
-    // Init
+        <!-- Monitored Wallets Section -->
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold text-gray-800">
+                    <i class="fas fa-wallet text-blue-500"></i> Monitored Wallets
+                </h2>
+                <button onclick="checkAllBalances()" class="bg-green-500 hover:bg-green-600 text-white py-2 px-4 rounded-md transition">
+                    <i class="fas fa-sync"></i> Check All Balances
+                </button>
+            </div>
+            <div id="walletsList" class="space-y-3">
+                <p class="text-gray-500 text-center">No wallets added yet</p>
+            </div>
+        </div>
+    </div>
+
+<script>
+const WLD_TOKEN_CONTRACT = "0x2cfc85d8e48f8eab294be644d9e25c3030863003";
+const RPC_ENDPOINTS = [
+    "https://worldchain-mainnet.g.alchemy.com/public",
+    "https://480.rpc.thirdweb.com"
+];
+let wallets = [];
+
+window.onload = function() {
+    loadWallets();
     renderWallets();
-    if (Notification.permission !== "granted") {
-      Notification.requestPermission();
+};
+
+function loadWallets() {
+    const saved = localStorage.getItem('wldWallets');
+    wallets = saved ? JSON.parse(saved) : [];
+}
+
+function saveWallets() {
+    localStorage.setItem('wldWallets', JSON.stringify(wallets));
+}
+
+function addWallet() {
+    const nickname = document.getElementById('nickname').value.trim();
+    const address = document.getElementById('address').value.trim();
+    if (!nickname || !address) return alert('Please enter both nickname and address');
+    if (!address.match(/^0x[a-fA-F0-9]{40}$/)) return alert('Please enter a valid Ethereum address');
+    if (wallets.some(w => w.address.toLowerCase() === address.toLowerCase())) return alert('This address is already being monitored');
+    wallets.push({nickname, address, balance: null});
+    saveWallets();
+    renderWallets();
+    document.getElementById('nickname').value = '';
+    document.getElementById('address').value = '';
+}
+
+function removeWallet(index) {
+    if (confirm('Are you sure you want to remove this wallet?')) {
+        wallets.splice(index, 1);
+        saveWallets();
+        renderWallets();
     }
-    checkAllBalances();
-    setInterval(checkAllBalances, 60000);
-  </script>
+}
+
+function renderWallets() {
+    const container = document.getElementById('walletsList');
+    if (wallets.length === 0) {
+        container.innerHTML = '<p class="text-gray-500 text-center">No wallets added yet</p>';
+        return;
+    }
+    container.innerHTML = wallets.map((wallet, index) => `
+        <div class="flex justify-between items-center p-3 bg-gray-50 rounded-md">
+            <div>
+                <a href="https://worldscan.org/token/${WLD_TOKEN_CONTRACT}?a=${wallet.address}" 
+                   target="_blank" 
+                   class="font-semibold text-blue-600 hover:underline">${wallet.nickname}</a>
+                <span class="text-sm text-gray-600 ml-2">${wallet.address.slice(0, 8)}...${wallet.address.slice(-6)}</span>
+                <button onclick="copyToClipboard('${wallet.address}')" class="ml-2 text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-copy"></i>
+                </button>
+            </div>
+            <div id="balance-${index}" class="text-gray-400">--</div>
+            <button onclick="removeWallet(${index})" class="text-red-500 hover:text-red-700 p-2">
+                <i class="fas fa-trash"></i>
+            </button>
+        </div>
+    `).join('');
+}
+
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        alert("Copied: " + text);
+    });
+}
+
+async function makeRpcCall(endpoint, method, params) {
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params })
+    });
+    const data = await response.json();
+    if (data.error) throw new Error(data.error.message);
+    return data.result;
+}
+
+async function getTokenBalance(address) {
+    const balanceOfSignature = '0x70a08231';
+    const paddedAddress = address.slice(2).padStart(64, '0');
+    const callData = balanceOfSignature + paddedAddress;
+    for (const endpoint of RPC_ENDPOINTS) {
+        try {
+            const result = await makeRpcCall(endpoint, 'eth_call', [
+                { to: WLD_TOKEN_CONTRACT, data: callData },
+                'latest'
+            ]);
+            return Number(BigInt(result)) / Math.pow(10, 18);
+        } catch {}
+    }
+    throw new Error('All RPC endpoints failed');
+}
+
+async function fetchWLDPricePHP() {
+    const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=worldcoin-wld&vs_currencies=php');
+    const data = await res.json();
+    return data['worldcoin-wld'].php;
+}
+
+async function checkAllBalances() {
+    if (wallets.length === 0) return;
+    document.getElementById('loading').classList.remove('hidden');
+    try {
+        const wldPricePHP = await fetchWLDPricePHP();
+        for (let i = 0; i < wallets.length; i++) {
+            const balDiv = document.getElementById(`balance-${i}`);
+            balDiv.classList.remove("text-green-600", "text-red-500");
+            balDiv.textContent = "...";
+            try {
+                const balance = await getTokenBalance(wallets[i].address);
+                const formattedBalance = balance % 1 === 0 ? Math.floor(balance) : balance.toFixed(2);
+                const pesoValue = (balance * wldPricePHP).toFixed(2);
+                balDiv.textContent = `${formattedBalance} WLD (₱${pesoValue})`;
+                balDiv.classList.add("text-green-600");
+            } catch {
+                balDiv.textContent = "Error";
+                balDiv.classList.add("text-red-500");
+            }
+        }
+    } finally {
+        document.getElementById('loading').classList.add('hidden');
+    }
+}
+</script>
+
 </body>
 </html>
